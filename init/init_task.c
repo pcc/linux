@@ -11,6 +11,7 @@
 #include <linux/mm.h>
 #include <linux/audit.h>
 #include <linux/numa.h>
+#include <linux/scs.h>
 
 #include <asm/pgtable.h>
 #include <linux/uaccess.h>
@@ -184,7 +185,13 @@ struct task_struct init_task
 	.security	= NULL,
 #endif
 };
+
 EXPORT_SYMBOL(init_task);
+
+#ifdef CONFIG_SHADOW_CALL_STACK
+unsigned long init_shadow_call_stack[SCS_SIZE / sizeof(long)]
+	__init_task_data __aligned(SCS_SIZE);
+#endif
 
 /*
  * Initial thread structure. Alignment of this is handled by a special
