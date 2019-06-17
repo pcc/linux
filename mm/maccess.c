@@ -34,7 +34,9 @@ probe_read_common(void *dst, const void __user *src, size_t size)
  */
 
 long __weak probe_kernel_read(void *dst, const void *src, size_t size)
-    __attribute__((alias("__probe_kernel_read")));
+{
+	return __probe_kernel_read(dst, src, size);
+}
 
 long __probe_kernel_read(void *dst, const void *src, size_t size)
 {
@@ -86,7 +88,9 @@ EXPORT_SYMBOL_GPL(probe_user_read);
  * happens, handle that and return -EFAULT.
  */
 long __weak probe_kernel_write(void *dst, const void *src, size_t size)
-    __attribute__((alias("__probe_kernel_write")));
+{
+	return __probe_kernel_write(dst, src, size);
+}
 
 long __probe_kernel_write(void *dst, const void *src, size_t size)
 {
