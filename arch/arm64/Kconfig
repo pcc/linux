@@ -1447,6 +1447,15 @@ config RELOCATABLE
 	  relocation pass at runtime even if the kernel is loaded at the
 	  same address it was linked at.
 
+config RELR
+	bool "Use RELR relocation packing"
+	depends on RELOCATABLE && $(ld-option,--pack-dyn-relocs=relr)
+	help
+	  Store the kernel's dynamic relocations in the RELR relocation packing
+	  format. Requires a compatible linker (currently only LLD supports
+	  this feature), as well as compatible NM and OBJCOPY utilities
+	  (llvm-nm and llvm-objcopy are compatible).
+
 config RANDOMIZE_BASE
 	bool "Randomize the address of the kernel image"
 	select ARM64_MODULE_PLTS if MODULES
