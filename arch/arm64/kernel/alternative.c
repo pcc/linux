@@ -144,7 +144,6 @@ static void clean_dcache_range_nopatch(u64 start, u64 end)
 	} while (cur += d_size, cur < end);
 }
 
-__attribute__((no_sanitize("cfi")))
 static void __apply_alternatives(void *alt_region,  bool is_module,
 				 unsigned long *feature_mask)
 {

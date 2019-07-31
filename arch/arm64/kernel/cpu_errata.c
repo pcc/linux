@@ -300,9 +300,9 @@ static int __init ssbd_cfg(char *buf)
 }
 early_param("ssbd", ssbd_cfg);
 
-void __init arm64_update_smccc_conduit(struct alt_instr *alt,
-				       __le32 *origptr, __le32 *updptr,
-				       int nr_inst)
+__attribute__((cfi_jump_table_canonical)) void __init
+arm64_update_smccc_conduit(struct alt_instr *alt, __le32 *origptr,
+			   __le32 *updptr, int nr_inst)
 {
 	u32 insn;
 
@@ -322,9 +322,8 @@ void __init arm64_update_smccc_conduit(struct alt_instr *alt,
 	*updptr = cpu_to_le32(insn);
 }
 
-void __init arm64_enable_wa2_handling(struct alt_instr *alt,
-				      __le32 *origptr, __le32 *updptr,
-				      int nr_inst)
+__attribute__((cfi_jump_table_canonical)) void __init arm64_enable_wa2_handling(
+	struct alt_instr *alt, __le32 *origptr, __le32 *updptr, int nr_inst)
 {
 	BUG_ON(nr_inst != 1);
 	/*
