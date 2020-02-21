@@ -11,6 +11,7 @@
 #include <linux/audit.h>
 #include <linux/compat.h>
 #include <linux/kernel.h>
+#include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/task_stack.h>
 #include <linux/mm.h>
@@ -1797,7 +1798,51 @@ const struct user_regset_view *task_user_regset_view(struct task_struct *task)
 long arch_ptrace(struct task_struct *child, long request,
 		 unsigned long addr, unsigned long data)
 {
-	return ptrace_request(child, request, addr, data);
+	switch (request) {
+	case PTRACE_PEEKTAG: {
+		struct mm_struct *mm = get_task_mm(child);
+		if (!mm)
+			return -EIO;
+
+		if (!child->ptrace || (current != child->parent) ||
+		    ((get_dumpable(mm) != SUID_DUMP_USER) &&
+		     !ptracer_capable(child, mm->user_ns))) {
+			mmput(mm);
+			return -EIO;
+		}
+
+		if (down_read_killable(&mm->mmap_sem)) {
+			mmput(mm);
+			return -EIO;
+		}
+
+		struct page *page = NULL;
+		struct vm_area_struct *vma;
+		int ret = get_user_pages_remote(child, mm, addr, 1, FOLL_FORCE,
+						&page, &vma, NULL);
+		if (ret <= 0) {
+			up_read(&mm->mmap_sem);
+			mmput(mm);
+			return -EIO;
+		}
+
+		void *maddr = kmap(page);
+		int offset = addr & (PAGE_SIZE - 1);
+		long tagged_addr;
+		__asm__ __volatile__(".arch_extension mte; ldg %0, [%1]"
+				     : "=r"(tagged_addr)
+				     : "r"(maddr + offset));
+
+		kunmap(page);
+		put_page(page);
+		up_read(&mm->mmap_sem);
+		mmput(mm);
+		return tagged_addr >> 56;
+	}
+
+	default:
+		return ptrace_request(child, request, addr, data);
+	}
 }
 
 enum ptrace_syscall_dir {

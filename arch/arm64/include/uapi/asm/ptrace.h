@@ -68,6 +68,8 @@
 #define PTRACE_SYSEMU		  31
 #define PTRACE_SYSEMU_SINGLESTEP  32
 
+#define PTRACE_PEEKTAG		  33
+
 #ifndef __ASSEMBLY__
 
 /*
