@@ -786,9 +786,9 @@ work_pending:
 ret_to_user:
 	disable_daif
 	/* Check for asynchronous tag check faults in the uaccess routines */
-	check_mte_async_tcf x1, x2
 	gic_prio_kentry_setup tmp=x3
 	ldr	x1, [tsk, #TSK_TI_FLAGS]
+	check_mte_async_tcf x1, x2
 	and	x2, x1, #_TIF_WORK_MASK
 	cbnz	x2, work_pending
 finish_ret_to_user:
