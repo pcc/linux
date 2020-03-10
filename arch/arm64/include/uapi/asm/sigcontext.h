@@ -44,6 +44,7 @@ struct sigcontext {
  *
  *	0x210		fpsimd_context
  *	 0x10		esr_context
+ *	 0x10		far_context
  *	0x8a0		sve_context (vl <= 64) (optional)
  *	 0x20		extra_context (optional)
  *	 0x10		terminator (null _aarch64_ctx)
@@ -92,6 +93,14 @@ struct fpsimd_context {
 struct esr_context {
 	struct _aarch64_ctx head;
 	__u64 esr;
+};
+
+/* FAR_EL1 context */
+#define FAR_MAGIC	0x46415201
+
+struct far_context {
+	struct _aarch64_ctx head;
+	__u64 far;
 };
 
 /*

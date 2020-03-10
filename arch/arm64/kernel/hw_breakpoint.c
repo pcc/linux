@@ -730,7 +730,7 @@ static u64 get_distance_from_watchpoint(unsigned long addr, u64 val,
 		return 0;
 }
 
-static int watchpoint_handler(unsigned long addr, unsigned int esr,
+static int watchpoint_handler(unsigned long far, unsigned int esr,
 			      struct pt_regs *regs)
 {
 	int i, step = 0, *kernel_step, access, closest_match = 0;
@@ -741,6 +741,7 @@ static int watchpoint_handler(unsigned long addr, unsigned int esr,
 	struct debug_info *debug_info;
 	struct arch_hw_breakpoint *info;
 	struct arch_hw_breakpoint_ctrl ctrl;
+	unsigned long addr = untagged_addr(far);
 
 	slots = this_cpu_ptr(wp_on_reg);
 	debug_info = &current->thread.debug;

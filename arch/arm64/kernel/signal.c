@@ -55,6 +55,7 @@ struct rt_sigframe_user_layout {
 
 	unsigned long fpsimd_offset;
 	unsigned long esr_offset;
+	unsigned long far_offset;
 	unsigned long sve_offset;
 	unsigned long extra_offset;
 	unsigned long end_offset;
@@ -383,6 +384,7 @@ static int parse_user_sigframe(struct user_ctxs *user,
 			break;
 
 		case ESR_MAGIC:
+		case FAR_MAGIC:
 			/* ignore */
 			break;
 
@@ -581,6 +583,11 @@ static int setup_sigframe_layout(struct rt_sigframe_user_layout *user,
 				     sizeof(struct esr_context));
 		if (err)
 			return err;
+
+		err = sigframe_alloc(user, &user->far_offset,
+				     sizeof(struct far_context));
+		if (err)
+			return err;
 	}
 
 	if (system_supports_sve()) {
@@ -621,7 +628,8 @@ static int setup_sigframe(struct rt_sigframe_user_layout *user,
 	__put_user_error(regs->pc, &sf->uc.uc_mcontext.pc, err);
 	__put_user_error(regs->pstate, &sf->uc.uc_mcontext.pstate, err);
 
-	__put_user_error(current->thread.fault_address, &sf->uc.uc_mcontext.fault_address, err);
+	__put_user_error(untagged_addr(current->thread.fault_address),
+			 &sf->uc.uc_mcontext.fault_address, err);
 
 	err |= __copy_to_user(&sf->uc.uc_sigmask, set, sizeof(*set));
 
@@ -639,6 +647,15 @@ static int setup_sigframe(struct rt_sigframe_user_layout *user,
 		__put_user_error(ESR_MAGIC, &esr_ctx->head.magic, err);
 		__put_user_error(sizeof(*esr_ctx), &esr_ctx->head.size, err);
 		__put_user_error(current->thread.fault_code, &esr_ctx->esr, err);
+        }
+
+	if (err == 0 && user->far_offset) {
+		struct far_context __user *far_ctx =
+			apply_user_offset(user, user->far_offset);
+
+		__put_user_error(FAR_MAGIC, &far_ctx->head.magic, err);
+		__put_user_error(sizeof(*far_ctx), &far_ctx->head.size, err);
+		__put_user_error(current->thread.fault_address, &far_ctx->far, err);
 	}
 
 	/* Scalable Vector Extension state, if present */
