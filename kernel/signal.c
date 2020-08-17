@@ -1651,6 +1651,15 @@ void force_sigsegv(int sig)
 	force_sig(SIGSEGV);
 }
 
+static void __user *get_si_addr(void __user *addr, unsigned long sig,
+				unsigned long si_code)
+{
+	if (current->sighand->action[sig - 1].sa.sa_flags & SA_EXPOSE_TAGBITS)
+		return addr;
+
+	return arch_untagged_si_addr(addr, sig, si_code);
+}
+
 int force_sig_fault_to_task(int sig, int code, void __user *addr
 	___ARCH_SI_TRAPNO(int trapno)
 	___ARCH_SI_IA64(int imm, unsigned int flags, unsigned long isr)
@@ -1662,7 +1671,7 @@ int force_sig_fault_to_task(int sig, int code, void __user *addr
 	info.si_signo = sig;
 	info.si_errno = 0;
 	info.si_code  = code;
-	info.si_addr  = addr;
+	info.si_addr  = get_si_addr(addr, sig, code);
 #ifdef __ARCH_SI_TRAPNO
 	info.si_trapno = trapno;
 #endif
@@ -1694,7 +1703,7 @@ int send_sig_fault(int sig, int code, void __user *addr
 	info.si_signo = sig;
 	info.si_errno = 0;
 	info.si_code  = code;
-	info.si_addr  = addr;
+	info.si_addr  = get_si_addr(addr, sig, code);
 #ifdef __ARCH_SI_TRAPNO
 	info.si_trapno = trapno;
 #endif
@@ -1715,7 +1724,7 @@ int force_sig_mceerr(int code, void __user *addr, short lsb)
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
 	info.si_code = code;
-	info.si_addr = addr;
+	info.si_addr = get_si_addr(addr, SIGBUS, code);
 	info.si_addr_lsb = lsb;
 	return force_sig_info(&info);
 }
@@ -1729,7 +1738,7 @@ int send_sig_mceerr(int code, void __user *addr, short lsb, struct task_struct *
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
 	info.si_code = code;
-	info.si_addr = addr;
+	info.si_addr = get_si_addr(addr, SIGBUS, code);
 	info.si_addr_lsb = lsb;
 	return send_sig_info(info.si_signo, &info, t);
 }
@@ -1743,7 +1752,7 @@ int force_sig_bnderr(void __user *addr, void __user *lower, void __user *upper)
 	info.si_signo = SIGSEGV;
 	info.si_errno = 0;
 	info.si_code  = SEGV_BNDERR;
-	info.si_addr  = addr;
+	info.si_addr  = get_si_addr(addr, SIGSEGV, SEGV_BNDERR);
 	info.si_lower = lower;
 	info.si_upper = upper;
 	return force_sig_info(&info);
@@ -1758,7 +1767,7 @@ int force_sig_pkuerr(void __user *addr, u32 pkey)
 	info.si_signo = SIGSEGV;
 	info.si_errno = 0;
 	info.si_code  = SEGV_PKUERR;
-	info.si_addr  = addr;
+	info.si_addr  = get_si_addr(addr, SIGSEGV, SEGV_PKUERR);
 	info.si_pkey  = pkey;
 	return force_sig_info(&info);
 }
@@ -1775,7 +1784,7 @@ int force_sig_ptrace_errno_trap(int errno, void __user *addr)
 	info.si_signo = SIGTRAP;
 	info.si_errno = errno;
 	info.si_code  = TRAP_HWBKPT;
-	info.si_addr  = addr;
+	info.si_addr  = get_si_addr(addr, SIGTRAP, TRAP_HWBKPT);
 	return force_sig_info(&info);
 }
 
