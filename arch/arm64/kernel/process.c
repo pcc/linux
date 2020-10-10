@@ -548,6 +548,37 @@ static void erratum_1418040_thread_switch(struct task_struct *prev,
 	write_sysreg(val, cntkctl_el1);
 }
 
+#if defined(CONFIG_ARM64_PTR_AUTH) || defined(CONFIG_ARM64_MTE)
+static void update_sctlr_el1(u64 sctlr)
+{
+	/*
+	 * EnIA must not be cleared while in the kernel as this is necessary for
+	 * in-kernel PAC. It will be cleared on kernel exit if needed.
+	 */
+	sysreg_clear_set(sctlr_el1, SCTLR_TASK_MASK & ~SCTLR_ELx_ENIA, sctlr);
+
+	/* ISB required for the kernel uaccess routines when setting TCF0. */
+	isb();
+}
+
+void set_task_sctlr_el1(u64 sctlr)
+{
+	/*
+	 * __switch_to() checks current->thread.sctlr as an
+	 * optimisation. Disable preemption so that it does not see
+	 * the variable update before the SCTLR_EL1 one.
+	 */
+	preempt_disable();
+	current->thread.sctlr = sctlr;
+	update_sctlr_el1(sctlr);
+	preempt_enable();
+}
+#else
+static void update_sctlr_el1(u64 sctlr)
+{
+}
+#endif  /* defined(CONFIG_ARM64_PTR_AUTH) || defined(CONFIG_ARM64_MTE) */
+
 /*
  * Thread switching.
  */
@@ -578,6 +609,10 @@ __notrace_funcgraph struct task_struct *__switch_to(struct task_struct *prev,
 	 * call.
 	 */
 	dsb(ish);
+
+	/* avoid expensive SCTLR_EL1 accesses if no change */
+	if (prev->thread.sctlr != next->thread.sctlr)
+		update_sctlr_el1(next->thread.sctlr);
 
 	/*
 	 * MTE thread switching must happen after the DSB above to ensure that
@@ -635,6 +670,8 @@ unsigned long arch_align_stack(unsigned long sp)
 void arch_setup_new_exec(void)
 {
 	current->mm->context.flags = is_compat_task() ? MMCF_AARCH32 : 0;
+	if (current->thread.sctlr != init_sctlr)
+		set_task_sctlr_el1(init_sctlr);
 
 	ptrauth_thread_init_user(current);
 

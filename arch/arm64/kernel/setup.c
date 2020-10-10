@@ -281,6 +281,8 @@ u64 cpu_logical_map(int cpu)
 	return __cpu_logical_map[cpu];
 }
 
+u64 init_sctlr;
+
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
 	init_mm.start_code = (unsigned long) _text;
@@ -368,6 +370,14 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	init_task.thread_info.ttbr0 = __pa_symbol(empty_zero_page);
 #endif
+
+	/*
+	 * Stash a task's initial SCTLR_EL1 per-task bits, which is the same as
+	 * the value that it was set to by the early startup code.
+	 */
+	asm("mrs %0, sctlr_el1" : "=r"(init_sctlr));
+	init_sctlr &= SCTLR_TASK_MASK;
+	init_task.thread.sctlr = init_sctlr;
 
 	if (boot_args[1] || boot_args[2] || boot_args[3]) {
 		pr_err("WARNING: x1-x3 nonzero in violation of boot protocol:\n"
