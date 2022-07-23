@@ -6,6 +6,8 @@
 #include <linux/bitops.h>
 #include <linux/cpu.h>
 #include <linux/kernel.h>
+#include <linux/migrate.h>
+#include <linux/migrate_mode.h>
 #include <linux/mm.h>
 #include <linux/prctl.h>
 #include <linux/sched.h>
@@ -573,4 +575,19 @@ size_t mte_probe_user_range(const char __user *uaddr, size_t size)
 	(void)val;
 
 	return 0;
+}
+
+void arch_pre_mprotect(struct vm_area_struct *vma, pmd_t *pmd,
+		       unsigned long addr, unsigned long end, pgprot_t newprot)
+{
+	int err;
+
+	if ((pgprot_val(newprot) & PTE_ATTRINDX_MASK) !=
+	    PTE_ATTRINDX(MT_NORMAL_TAGGED))
+		return;
+
+	err = migrate_to_gfp_flags(vma->vm_mm, addr, end,
+				   GFP_HIGHUSER_MOVABLE | __GFP_ZEROTAGS);
+	if (err != 0)
+		printk(KERN_ERR "migrate_to_gfp_flags failed, %d\n", err);
 }

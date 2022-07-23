@@ -94,6 +94,8 @@ static unsigned long change_pte_range(struct mmu_gather *tlb,
 	if (pmd_trans_unstable(pmd))
 		return 0;
 
+	arch_pre_mprotect(vma, pmd, addr, end, newprot);
+
 	/*
 	 * The pmd points to a regular pte so the pmd can't change
 	 * from under us even if the mmap_lock is only hold for

@@ -272,6 +272,17 @@ task_cpu_possible_mask(struct task_struct *p)
 }
 #define task_cpu_possible_mask	task_cpu_possible_mask
 
+#ifdef CONFIG_ARM64_MTE
+void arch_pre_mprotect(struct vm_area_struct *vma, pmd_t *pmd,
+		       unsigned long addr, unsigned long end, pgprot_t newprot);
+#else
+static inline void arch_pre_mprotect(struct vm_area_struct *vma, pmd_t *pmd,
+				     unsigned long addr, unsigned long end,
+				     pgprot_t newprot)
+{
+}
+#endif
+
 void verify_cpu_asid_bits(void);
 void post_ttbr_update_workaround(void);
 

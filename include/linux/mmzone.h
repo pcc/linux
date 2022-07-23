@@ -31,6 +31,8 @@
 #endif
 #define MAX_ORDER_NR_PAGES (1 << (MAX_ORDER - 1))
 
+#define NOMTE_MAX_ORDER 5
+
 /*
  * PAGE_ALLOC_COSTLY_ORDER is the order at which allocations are deemed
  * costly to service.  That is between allocation orders which should
@@ -366,7 +368,7 @@ enum zone_watermarks {
 #define NR_PCP_THP 0
 #endif
 #define NR_LOWORDER_PCP_LISTS (MIGRATE_PCPTYPES * (PAGE_ALLOC_COSTLY_ORDER + 1))
-#define NR_PCP_LISTS (NR_LOWORDER_PCP_LISTS + NR_PCP_THP)
+#define NR_PCP_LISTS (2 * (NR_LOWORDER_PCP_LISTS + NR_PCP_THP))
 
 /*
  * Shift to encode migratetype and order in the same integer, with order
@@ -631,6 +633,7 @@ struct zone {
 
 	/* free areas of different sizes */
 	struct free_area	free_area[MAX_ORDER];
+	struct free_area	nomte_free_area[NOMTE_MAX_ORDER];
 
 	/* zone flags, see below */
 	unsigned long		flags;

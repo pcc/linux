@@ -47,6 +47,7 @@ enum memblock_flags {
 	MEMBLOCK_MIRROR		= 0x2,	/* mirrored region */
 	MEMBLOCK_NOMAP		= 0x4,	/* don't add to kernel direct mapping */
 	MEMBLOCK_DRIVER_MANAGED = 0x8,	/* always detected via a driver */
+	MEMBLOCK_MTE		= 0x10,
 };
 
 /**
@@ -135,12 +136,14 @@ void reset_all_zones_managed_pages(void);
 void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 		      struct memblock_type *type_a,
 		      struct memblock_type *type_b, phys_addr_t *out_start,
-		      phys_addr_t *out_end, int *out_nid);
+		      phys_addr_t *out_end, int *out_nid,
+		      enum memblock_flags *out_flags);
 
 void __next_mem_range_rev(u64 *idx, int nid, enum memblock_flags flags,
 			  struct memblock_type *type_a,
 			  struct memblock_type *type_b, phys_addr_t *out_start,
-			  phys_addr_t *out_end, int *out_nid);
+			  phys_addr_t *out_end, int *out_nid,
+			  enum memblock_flags *out_flags);
 
 void memblock_free_late(phys_addr_t base, phys_addr_t size);
 
@@ -152,7 +155,7 @@ static inline void __next_physmem_range(u64 *idx, struct memblock_type *type,
 	extern struct memblock_type physmem;
 
 	__next_mem_range(idx, NUMA_NO_NODE, MEMBLOCK_NONE, &physmem, type,
-			 out_start, out_end, NULL);
+			 out_start, out_end, NULL, NULL);
 }
 
 /**
@@ -181,12 +184,12 @@ static inline void __next_physmem_range(u64 *idx, struct memblock_type *type,
  * @p_nid: ptr to int for nid of the range, can be %NULL
  */
 #define __for_each_mem_range(i, type_a, type_b, nid, flags,		\
-			   p_start, p_end, p_nid)			\
+			   p_start, p_end, p_nid, p_flags)		\
 	for (i = 0, __next_mem_range(&i, nid, flags, type_a, type_b,	\
-				     p_start, p_end, p_nid);		\
+				     p_start, p_end, p_nid, p_flags);	\
 	     i != (u64)ULLONG_MAX;					\
 	     __next_mem_range(&i, nid, flags, type_a, type_b,		\
-			      p_start, p_end, p_nid))
+			      p_start, p_end, p_nid, p_flags))
 
 /**
  * __for_each_mem_range_rev - reverse iterate through memblock areas from
@@ -201,13 +204,13 @@ static inline void __next_physmem_range(u64 *idx, struct memblock_type *type,
  * @p_nid: ptr to int for nid of the range, can be %NULL
  */
 #define __for_each_mem_range_rev(i, type_a, type_b, nid, flags,		\
-				 p_start, p_end, p_nid)			\
+				 p_start, p_end, p_nid, p_flags)	\
 	for (i = (u64)ULLONG_MAX,					\
 		     __next_mem_range_rev(&i, nid, flags, type_a, type_b, \
-					  p_start, p_end, p_nid);	\
+					  p_start, p_end, p_nid, p_flags); \
 	     i != (u64)ULLONG_MAX;					\
 	     __next_mem_range_rev(&i, nid, flags, type_a, type_b,	\
-				  p_start, p_end, p_nid))
+				  p_start, p_end, p_nid, p_flags))
 
 /**
  * for_each_mem_range - iterate through memory areas.
@@ -218,7 +221,7 @@ static inline void __next_physmem_range(u64 *idx, struct memblock_type *type,
 #define for_each_mem_range(i, p_start, p_end) \
 	__for_each_mem_range(i, &memblock.memory, NULL, NUMA_NO_NODE,	\
 			     MEMBLOCK_HOTPLUG | MEMBLOCK_DRIVER_MANAGED, \
-			     p_start, p_end, NULL)
+			     p_start, p_end, NULL, NULL)
 
 /**
  * for_each_mem_range_rev - reverse iterate through memblock areas from
@@ -230,7 +233,7 @@ static inline void __next_physmem_range(u64 *idx, struct memblock_type *type,
 #define for_each_mem_range_rev(i, p_start, p_end)			\
 	__for_each_mem_range_rev(i, &memblock.memory, NULL, NUMA_NO_NODE, \
 				 MEMBLOCK_HOTPLUG | MEMBLOCK_DRIVER_MANAGED,\
-				 p_start, p_end, NULL)
+				 p_start, p_end, NULL, NULL)
 
 /**
  * for_each_reserved_mem_range - iterate over all reserved memblock areas
@@ -243,7 +246,7 @@ static inline void __next_physmem_range(u64 *idx, struct memblock_type *type,
  */
 #define for_each_reserved_mem_range(i, p_start, p_end)			\
 	__for_each_mem_range(i, &memblock.reserved, NULL, NUMA_NO_NODE,	\
-			     MEMBLOCK_NONE, p_start, p_end, NULL)
+			     MEMBLOCK_NONE, p_start, p_end, NULL, NULL)
 
 static inline bool memblock_is_hotpluggable(struct memblock_region *m)
 {
@@ -342,7 +345,7 @@ int __init deferred_page_init_max_threads(const struct cpumask *node_cpumask);
  */
 #define for_each_free_mem_range(i, nid, flags, p_start, p_end, p_nid)	\
 	__for_each_mem_range(i, &memblock.memory, &memblock.reserved,	\
-			     nid, flags, p_start, p_end, p_nid)
+			     nid, flags, p_start, p_end, p_nid, NULL)
 
 /**
  * for_each_free_mem_range_reverse - rev-iterate through free memblock areas
@@ -359,7 +362,7 @@ int __init deferred_page_init_max_threads(const struct cpumask *node_cpumask);
 #define for_each_free_mem_range_reverse(i, nid, flags, p_start, p_end,	\
 					p_nid)				\
 	__for_each_mem_range_rev(i, &memblock.memory, &memblock.reserved, \
-				 nid, flags, p_start, p_end, p_nid)
+				 nid, flags, p_start, p_end, p_nid, NULL)
 
 int memblock_set_node(phys_addr_t base, phys_addr_t size,
 		      struct memblock_type *type, int nid);

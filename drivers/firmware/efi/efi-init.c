@@ -194,7 +194,7 @@ static __init void reserve_regions(void)
 		size = npages << PAGE_SHIFT;
 
 		if (is_memory(md)) {
-			early_init_dt_add_memory_arch(paddr, size);
+			early_init_dt_add_memory(0, paddr, size);
 
 			if (!is_usable_memory(md))
 				memblock_mark_nomap(paddr, size);

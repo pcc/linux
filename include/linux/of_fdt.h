@@ -64,7 +64,12 @@ extern void early_init_dt_check_for_usable_mem_range(void);
 extern int early_init_dt_scan_chosen_stdout(void);
 extern void early_init_fdt_scan_reserved_mem(void);
 extern void early_init_fdt_reserve_self(void);
-extern void early_init_dt_add_memory_arch(u64 base, u64 size);
+extern void early_init_dt_add_memory(unsigned long node, u64 base, u64 size);
+extern void early_init_dt_add_memory_arch(unsigned long node, u64 base,
+					  u64 size);
+extern void early_init_dt_reserve_memory_arch(unsigned long node,
+					      phys_addr_t base,
+					      phys_addr_t size);
 extern u64 dt_mem_next_cell(int s, const __be32 **cellp);
 
 /* Early flat tree scan hooks */

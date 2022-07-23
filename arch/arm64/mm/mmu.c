@@ -524,6 +524,7 @@ static void __init map_mem(pgd_t *pgdp)
 	phys_addr_t kernel_end = __pa_symbol(__init_begin);
 	phys_addr_t start, end;
 	int flags = NO_EXEC_MAPPINGS;
+	enum memblock_flags block_flags;
 	u64 i;
 
 	/*
@@ -557,7 +558,9 @@ static void __init map_mem(pgd_t *pgdp)
 #endif
 
 	/* map all the memory banks */
-	for_each_mem_range(i, &start, &end) {
+	__for_each_mem_range(i, &memblock.memory, NULL, NUMA_NO_NODE,    
+                              MEMBLOCK_HOTPLUG | MEMBLOCK_DRIVER_MANAGED,  
+                              &start, &end, NULL, &block_flags) {
 		if (start >= end)
 			break;
 		/*
@@ -565,7 +568,10 @@ static void __init map_mem(pgd_t *pgdp)
 		 * if MTE is present. Otherwise, it has the same attributes as
 		 * PAGE_KERNEL.
 		 */
-		__map_memblock(pgdp, start, end, pgprot_tagged(PAGE_KERNEL),
+		__map_memblock(pgdp, start, end,
+			       (block_flags & MEMBLOCK_MTE) ?
+				       pgprot_tagged(PAGE_KERNEL) :
+				       PAGE_KERNEL,
 			       flags);
 	}
 

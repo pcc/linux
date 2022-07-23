@@ -43,6 +43,13 @@ typedef struct page *pgtable_t;
 
 int pfn_is_map_memory(unsigned long pfn);
 
+unsigned long pfn_to_tag_pfn(unsigned long pfn);
+unsigned long tag_pfn_to_pfn(unsigned long tag_pfn);
+#define __HAVE_ARCH_TAG_PFN
+
+void arch_alloc_page(struct page *page, int order);
+#define HAVE_ARCH_ALLOC_PAGE
+
 #include <asm/memory.h>
 
 #endif /* !__ASSEMBLY__ */

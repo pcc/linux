@@ -263,6 +263,83 @@ static int __init early_mem(char *p)
 }
 early_param("mem", early_mem);
 
+struct pfn_to_tag_pfn {
+	unsigned long pfn, tag_pfn, len;
+} pfn_to_tag_pfn_map[4];
+
+unsigned long pfn_to_tag_pfn(unsigned long pfn)
+{
+	int i;
+
+	for (i = 0; i != 4; ++i) {
+		struct pfn_to_tag_pfn *entry = &pfn_to_tag_pfn_map[i];
+
+		if (pfn >= entry->pfn && pfn < entry->pfn + 32 * entry->len)
+			return entry->tag_pfn + (pfn - entry->pfn) / 32;
+	}
+	return 0;
+}
+
+unsigned long tag_pfn_to_pfn(unsigned long tag_pfn)
+{
+	int i;
+
+	for (i = 0; i != 4; ++i) {
+		struct pfn_to_tag_pfn *entry = &pfn_to_tag_pfn_map[i];
+
+		if (tag_pfn >= entry->tag_pfn &&
+		    tag_pfn < entry->tag_pfn + entry->len)
+			return entry->pfn + (tag_pfn - entry->tag_pfn) * 32;
+	}
+	return 0;
+}
+
+void __init early_init_dt_reserve_memory_arch(unsigned long node,
+					      phys_addr_t base,
+					      phys_addr_t size)
+{
+	const __be32 *prop;
+	int len;
+	phys_addr_t storage_base;
+	int i;
+
+	if (!of_flat_dt_is_compatible(node, "arm,mte-tag-storage"))
+		return;
+
+	/* We only support one reservation per node. */
+	prop = of_get_flat_dt_prop(node, "reg", &len);
+	if (!prop || len / 4 != dt_root_addr_cells + dt_root_size_cells)
+		return;
+
+	prop = of_get_flat_dt_prop(node, "storage-base", &len);
+	if (!prop || len / 4 != dt_root_addr_cells)
+		return;
+
+	storage_base = dt_mem_next_cell(dt_root_addr_cells, &prop);
+
+	for (i = 0; i < 4 && pfn_to_tag_pfn_map[i].pfn != 0; ++i)
+		;
+
+	if (i != 4) {
+		struct pfn_to_tag_pfn *entry = &pfn_to_tag_pfn_map[i];
+
+		entry->pfn = __phys_to_pfn(storage_base);
+		entry->tag_pfn = __phys_to_pfn(base);
+		entry->len = __phys_to_pfn(size);
+	}
+}
+
+void __init early_init_dt_add_memory_arch(unsigned long node, u64 base,
+					  u64 size)
+{
+	enum memblock_flags flags = MEMBLOCK_MTE;
+
+	if (node && of_get_flat_dt_prop(node, "arm,no-mte", NULL) != NULL) {
+		flags = 0;
+	}
+	memblock_add_node(base, size, MAX_NUMNODES, flags);
+}
+
 void __init arm64_memblock_init(void)
 {
 	s64 linear_region_size = PAGE_END - _PAGE_OFFSET(vabits_actual);

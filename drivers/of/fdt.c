@@ -495,6 +495,12 @@ static int __init early_init_dt_reserve_memory(phys_addr_t base,
 	return memblock_reserve(base, size);
 }
 
+void __init __weak early_init_dt_reserve_memory_arch(unsigned long node,
+						    phys_addr_t base,
+						    phys_addr_t size)
+{
+}
+
 /*
  * __reserved_mem_reserve_reg() - reserve all memory described in 'reg' property
  */
@@ -526,6 +532,7 @@ static int __init __reserved_mem_reserve_reg(unsigned long node,
 
 		if (size &&
 		    early_init_dt_reserve_memory(base, size, nomap) == 0) {
+			early_init_dt_reserve_memory_arch(node, base, size);
 			pr_debug("Reserved memory: reserved region for node '%s': base %pa, size %lu MiB\n",
 				uname, &base, (unsigned long)(size / SZ_1M));
 			if (!nomap)
@@ -1144,7 +1151,7 @@ int __init early_init_dt_scan_memory(void)
 				continue;
 			pr_debug(" - %llx, %llx\n", base, size);
 
-			early_init_dt_add_memory_arch(base, size);
+			early_init_dt_add_memory(node, base, size);
 
 			if (!hotpluggable)
 				continue;
@@ -1222,7 +1229,7 @@ int __init early_init_dt_scan_chosen(char *cmdline)
 #define MAX_MEMBLOCK_ADDR	((phys_addr_t)~0)
 #endif
 
-void __init __weak early_init_dt_add_memory_arch(u64 base, u64 size)
+void __init early_init_dt_add_memory(unsigned long node, u64 base, u64 size)
 {
 	const u64 phys_offset = MIN_MEMBLOCK_ADDR;
 
@@ -1261,6 +1268,12 @@ void __init __weak early_init_dt_add_memory_arch(u64 base, u64 size)
 		size -= phys_offset - base;
 		base = phys_offset;
 	}
+	early_init_dt_add_memory_arch(node, base, size);
+}
+
+void __init __weak early_init_dt_add_memory_arch(unsigned long node, u64 base,
+						 u64 size)
+{
 	memblock_add(base, size);
 }
 

@@ -171,6 +171,8 @@ static inline void check_highest_zone(enum zone_type k)
 int do_migrate_pages(struct mm_struct *mm, const nodemask_t *from,
 		     const nodemask_t *to, int flags);
 
+int migrate_to_gfp_flags(struct mm_struct *mm, unsigned long start,
+			 unsigned long end, unsigned int gfp_flags);
 
 #ifdef CONFIG_TMPFS
 extern int mpol_parse_str(char *str, struct mempolicy **mpol);

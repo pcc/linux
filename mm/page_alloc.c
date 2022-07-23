@@ -720,25 +720,26 @@ out:
 	add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE);
 }
 
-static inline unsigned int order_to_pindex(int migratetype, int order)
+static inline unsigned int order_to_pindex(int migratetype, int order, bool mte)
 {
 	int base = order;
+	int mte_base = mte ? (NR_PCP_LISTS >> 1) : 0;
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	if (order > PAGE_ALLOC_COSTLY_ORDER) {
 		VM_BUG_ON(order != pageblock_order);
-		return NR_LOWORDER_PCP_LISTS;
+		return mte_base + NR_LOWORDER_PCP_LISTS;
 	}
 #else
 	VM_BUG_ON(order > PAGE_ALLOC_COSTLY_ORDER);
 #endif
 
-	return (MIGRATE_PCPTYPES * base) + migratetype;
+	return mte_base + (MIGRATE_PCPTYPES * base) + migratetype;
 }
 
 static inline int pindex_to_order(unsigned int pindex)
 {
-	int order = pindex / MIGRATE_PCPTYPES;
+	int order = (pindex % (NR_PCP_LISTS >> 1)) / MIGRATE_PCPTYPES;
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	if (pindex == NR_LOWORDER_PCP_LISTS)
@@ -1006,9 +1007,11 @@ compaction_capture(struct capture_control *capc, struct page *page,
 
 /* Used for pages not on another list */
 static inline void add_to_free_list(struct page *page, struct zone *zone,
-				    unsigned int order, int migratetype)
+				    unsigned int order, int migratetype,
+				    bool nomte)
 {
-	struct free_area *area = &zone->free_area[order];
+	struct free_area *area = nomte ? &zone->nomte_free_area[order] :
+					 &zone->free_area[order];
 
 	list_add(&page->buddy_list, &area->free_list[migratetype]);
 	area->nr_free++;
@@ -1016,9 +1019,11 @@ static inline void add_to_free_list(struct page *page, struct zone *zone,
 
 /* Used for pages not on another list */
 static inline void add_to_free_list_tail(struct page *page, struct zone *zone,
-					 unsigned int order, int migratetype)
+					 unsigned int order, int migratetype,
+					 bool nomte)
 {
-	struct free_area *area = &zone->free_area[order];
+	struct free_area *area = nomte ? &zone->nomte_free_area[order] :
+					 &zone->free_area[order];
 
 	list_add_tail(&page->buddy_list, &area->free_list[migratetype]);
 	area->nr_free++;
@@ -1109,6 +1114,7 @@ static inline void __free_one_page(struct page *page,
 	unsigned long combined_pfn;
 	struct page *buddy;
 	bool to_tail;
+	bool nomte = !test_bit(PG_mte_tagged, &page->flags);
 
 	VM_BUG_ON(!zone_is_initialized(zone));
 	VM_BUG_ON_PAGE(page->flags & PAGE_FLAGS_CHECK_AT_PREP, page);
@@ -1125,6 +1131,51 @@ static inline void __free_one_page(struct page *page,
 			__mod_zone_freepage_state(zone, -(1 << order),
 								migratetype);
 			return;
+		}
+
+		/* Must coalesce the tag pfn at this point. */
+		if (nomte && order == NOMTE_MAX_ORDER - 1) {
+			unsigned long tag_pfn = pfn_to_tag_pfn(pfn);
+
+			if (tag_pfn) {
+				struct page *tag_page = pfn_to_page(tag_pfn);
+				if (PageBuddy(tag_page)) {
+					del_page_from_free_list(tag_page, zone, 0);
+	                                set_bit(PG_reserved, &tag_page->flags);
+					atomic_inc(&tag_page->_refcount);
+				} else {
+					goto done_merging;
+				}
+			}
+		}
+
+		if (nomte && order == 0) {
+			unsigned long normal_pfn = tag_pfn_to_pfn(pfn);
+
+			if (normal_pfn) {
+				struct page *buddy1 = pfn_to_page(normal_pfn);
+				struct page *buddy2 = pfn_to_page(
+					normal_pfn +
+					(1 << (NOMTE_MAX_ORDER - 1)));
+
+				if (PageBuddy(buddy1) && PageBuddy(buddy2) &&
+				    buddy_order(buddy1) ==
+					    NOMTE_MAX_ORDER - 1 &&
+				    buddy_order(buddy2) ==
+					    NOMTE_MAX_ORDER - 1) {
+					del_page_from_free_list(buddy1, zone, NOMTE_MAX_ORDER - 1);
+	                                set_bit(PG_reserved, &page->flags);
+					atomic_inc(&page->_refcount);
+					
+					/* Pretend that we were coalescing the normal pfn all along. */
+					pfn = normal_pfn;
+					page = buddy1;
+					order = NOMTE_MAX_ORDER - 1;
+				} else {
+					buddy_pfn = 0;
+					goto done_merging;
+				}
+			}
 		}
 
 		buddy = find_buddy_page_pfn(page, pfn, order, &buddy_pfn);
@@ -1167,13 +1218,17 @@ done_merging:
 		to_tail = true;
 	else if (is_shuffle_order(order))
 		to_tail = shuffle_pick_tail();
-	else
+	else if (buddy_pfn != 0)
 		to_tail = buddy_merge_likely(pfn, buddy_pfn, page, order);
+	else
+		to_tail = false;
 
 	if (to_tail)
-		add_to_free_list_tail(page, zone, order, migratetype);
+		add_to_free_list_tail(page, zone, order, migratetype,
+				      nomte && order < NOMTE_MAX_ORDER);
 	else
-		add_to_free_list(page, zone, order, migratetype);
+		add_to_free_list(page, zone, order, migratetype,
+				 nomte && order < NOMTE_MAX_ORDER);
 
 	/* Notify page reporting subsystem of freed page */
 	if (!(fpi_flags & FPI_SKIP_REPORT_NOTIFY))
@@ -1263,30 +1318,39 @@ static inline bool page_expected_state(struct page *page,
 static const char *page_bad_reason(struct page *page, unsigned long flags)
 {
 	const char *bad_reason = NULL;
+	unsigned long bad_flags = page->flags & flags;
 
 	if (unlikely(atomic_read(&page->_mapcount) != -1))
-		bad_reason = "nonzero mapcount";
+		bad_reason = kstrdup("nonzero mapcount", GFP_KERNEL);
 	if (unlikely(page->mapping != NULL))
-		bad_reason = "non-NULL mapping";
+		bad_reason = kstrdup("non-NULL mapping", GFP_KERNEL);
 	if (unlikely(page_ref_count(page) != 0))
-		bad_reason = "nonzero _refcount";
-	if (unlikely(page->flags & flags)) {
+		bad_reason = kstrdup("nonzero _refcount", GFP_KERNEL);
+	if (unlikely(bad_flags)) {
 		if (flags == PAGE_FLAGS_CHECK_AT_PREP)
-			bad_reason = "PAGE_FLAGS_CHECK_AT_PREP flag(s) set";
+			bad_reason = kasprintf(
+				GFP_KERNEL,
+				"PAGE_FLAGS_CHECK_AT_PREP flag(s) set (%lx)",
+				bad_flags);
 		else
-			bad_reason = "PAGE_FLAGS_CHECK_AT_FREE flag(s) set";
+			bad_reason = kasprintf(
+				GFP_KERNEL,
+				"PAGE_FLAGS_CHECK_AT_FREE flag(s) set (%lx)",
+				bad_flags);
 	}
 #ifdef CONFIG_MEMCG
 	if (unlikely(page->memcg_data))
-		bad_reason = "page still charged to cgroup";
+		bad_reason = kstrdup("page still charged to cgroup", GFP_KERNEL);
 #endif
 	return bad_reason;
 }
 
 static void check_free_page_bad(struct page *page)
 {
-	bad_page(page,
-		 page_bad_reason(page, PAGE_FLAGS_CHECK_AT_FREE));
+	const char *reason = page_bad_reason(page, PAGE_FLAGS_CHECK_AT_FREE);
+
+	bad_page(page, reason);
+	kfree(reason);
 }
 
 static inline int check_free_page(struct page *page)
@@ -2338,9 +2402,10 @@ void __init init_cma_reserved_pageblock(struct page *page)
  * -- nyc
  */
 static inline void expand(struct zone *zone, struct page *page,
-	int low, int high, int migratetype)
+	int low, int high, int migratetype, unsigned int alloc_flags)
 {
 	unsigned long size = 1 << high;
+	bool nomte = !(alloc_flags & ALLOC_MTE);
 
 	while (high > low) {
 		high--;
@@ -2356,21 +2421,40 @@ static inline void expand(struct zone *zone, struct page *page,
 		if (set_page_guard(zone, &page[size], high, migratetype))
 			continue;
 
-		add_to_free_list(&page[size], zone, high, migratetype);
+		if (nomte && high == NOMTE_MAX_ORDER - 1) {
+			unsigned long tag_pfn =
+				pfn_to_tag_pfn(page_to_pfn(page + size));
+
+			if (tag_pfn) {
+				struct page *tag_page = pfn_to_page(tag_pfn);
+
+				clear_bit(PG_reserved, &tag_page->flags);
+				atomic_dec(&tag_page->_refcount);
+				add_to_free_list(tag_page, zone, 0,
+						 migratetype, true);
+				set_buddy_order(tag_page, 0);
+			}
+		}
+
+		add_to_free_list(&page[size], zone, high, migratetype,
+				 nomte && high < NOMTE_MAX_ORDER);
 		set_buddy_order(&page[size], high);
 	}
 }
 
 static void check_new_page_bad(struct page *page)
 {
+	const char *reason;
+
 	if (unlikely(page->flags & __PG_HWPOISON)) {
 		/* Don't complain about hwpoisoned pages */
 		page_mapcount_reset(page); /* remove PageBuddy */
 		return;
 	}
 
-	bad_page(page,
-		 page_bad_reason(page, PAGE_FLAGS_CHECK_AT_PREP));
+	reason = page_bad_reason(page, PAGE_FLAGS_CHECK_AT_PREP);
+	bad_page(page, reason);
+	kfree(reason);
 }
 
 /*
@@ -2550,9 +2634,10 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
  * Go through the free lists for the given migratetype and remove
  * the smallest available page from the freelists
  */
-static __always_inline
-struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
-						int migratetype)
+static __always_inline struct page *__rmqueue_smallest(struct zone *zone,
+						       unsigned int order,
+						       int migratetype,
+						       unsigned int alloc_flags)
 {
 	unsigned int current_order;
 	struct free_area *area;
@@ -2560,12 +2645,35 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 
 	/* Find a page of the appropriate size in the preferred list */
 	for (current_order = order; current_order < MAX_ORDER; ++current_order) {
-		area = &(zone->free_area[current_order]);
+		if (!(alloc_flags & ALLOC_MTE) && current_order < NOMTE_MAX_ORDER)
+			area = &(zone->nomte_free_area[current_order]);
+		else
+			area = &(zone->free_area[current_order]);
 		page = get_page_from_free_area(area, migratetype);
 		if (!page)
 			continue;
 		del_page_from_free_list(page, zone, current_order);
-		expand(zone, page, order, current_order, migratetype);
+		expand(zone, page, order, current_order, migratetype, alloc_flags);
+		if (!(alloc_flags & ALLOC_MTE) && order >= NOMTE_MAX_ORDER) {
+			unsigned long tag_pfn =
+				pfn_to_tag_pfn(page_to_pfn(page));
+			int i;
+
+			if (tag_pfn) {
+				for (i = 0; i != 1 << (order - NOMTE_MAX_ORDER);
+				     ++i) {
+					struct page *tag_page = pfn_to_page(tag_pfn + i);
+
+					clear_bit(PG_reserved,
+						  &tag_page->flags);
+					atomic_dec(&tag_page->_refcount);
+					add_to_free_list(tag_page, zone, 0,
+							 migratetype, true);
+					set_buddy_order(tag_page, 0);
+				}
+			}
+		}
+
 		set_pcppage_migratetype(page, migratetype);
 		trace_mm_page_alloc_zone_locked(page, order, migratetype,
 				pcp_allowed_order(order) &&
@@ -2591,9 +2699,9 @@ static int fallbacks[MIGRATE_TYPES][3] = {
 
 #ifdef CONFIG_CMA
 static __always_inline struct page *__rmqueue_cma_fallback(struct zone *zone,
-					unsigned int order)
+					unsigned int order, unsigned int alloc_flags)
 {
-	return __rmqueue_smallest(zone, order, MIGRATE_CMA);
+	return __rmqueue_smallest(zone, order, MIGRATE_CMA, alloc_flags);
 }
 #else
 static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
@@ -3091,16 +3199,16 @@ __rmqueue(struct zone *zone, unsigned int order, int migratetype,
 		if (alloc_flags & ALLOC_CMA &&
 		    zone_page_state(zone, NR_FREE_CMA_PAGES) >
 		    zone_page_state(zone, NR_FREE_PAGES) / 2) {
-			page = __rmqueue_cma_fallback(zone, order);
+			page = __rmqueue_cma_fallback(zone, order, alloc_flags);
 			if (page)
 				return page;
 		}
 	}
 retry:
-	page = __rmqueue_smallest(zone, order, migratetype);
+	page = __rmqueue_smallest(zone, order, migratetype, alloc_flags);
 	if (unlikely(!page)) {
 		if (alloc_flags & ALLOC_CMA)
-			page = __rmqueue_cma_fallback(zone, order);
+			page = __rmqueue_cma_fallback(zone, order, alloc_flags);
 
 		if (!page && __rmqueue_fallback(zone, order, migratetype,
 								alloc_flags))
@@ -3441,7 +3549,7 @@ static void free_unref_page_commit(struct zone *zone, struct per_cpu_pages *pcp,
 	bool free_high;
 
 	__count_vm_event(PGFREE);
-	pindex = order_to_pindex(migratetype, order);
+	pindex = order_to_pindex(migratetype, order, test_bit(PG_mte_tagged, &page->flags));
 	list_add(&page->pcp_list, &pcp->lists[pindex]);
 	pcp->count += 1 << order;
 
@@ -3714,7 +3822,7 @@ struct page *rmqueue_buddy(struct zone *preferred_zone, struct zone *zone,
 		 * request should skip it.
 		 */
 		if (order > 0 && alloc_flags & ALLOC_HARDER)
-			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC);
+			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC, alloc_flags);
 		if (!page) {
 			page = __rmqueue(zone, order, migratetype, alloc_flags);
 			if (!page) {
@@ -3803,7 +3911,7 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 	 * frees.
 	 */
 	pcp->free_factor >>= 1;
-	list = &pcp->lists[order_to_pindex(migratetype, order)];
+	list = &pcp->lists[order_to_pindex(migratetype, order, alloc_flags & ALLOC_MTE)];
 	page = __rmqueue_pcplist(zone, order, migratetype, alloc_flags, pcp, list);
 	pcp_spin_unlock_irqrestore(pcp, flags);
 	pcp_trylock_finish(UP_flags);
@@ -4155,6 +4263,10 @@ static inline unsigned int gfp_to_alloc_flags_cma(gfp_t gfp_mask,
 	if (gfp_migratetype(gfp_mask) == MIGRATE_MOVABLE)
 		alloc_flags |= ALLOC_CMA;
 #endif
+
+	if (gfp_mask & __GFP_ZEROTAGS)
+		alloc_flags |= ALLOC_MTE;
+
 	return alloc_flags;
 }
 
@@ -5418,7 +5530,7 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 		goto failed_irq;
 
 	/* Attempt the batch allocation */
-	pcp_list = &pcp->lists[order_to_pindex(ac.migratetype, 0)];
+	pcp_list = &pcp->lists[order_to_pindex(ac.migratetype, 0, alloc_flags & ALLOC_MTE)];
 	while (nr_populated < nr_pages) {
 
 		/* Skip existing pages */
@@ -6847,6 +6959,12 @@ static void __meminit zone_init_free_lists(struct zone *zone)
 		INIT_LIST_HEAD(&zone->free_area[order].free_list[t]);
 		zone->free_area[order].nr_free = 0;
 	}
+	for (order = 0; order < NOMTE_MAX_ORDER; order++)
+		for (t = 0; t < MIGRATE_TYPES; t++) {
+			INIT_LIST_HEAD(
+				&zone->nomte_free_area[order].free_list[t]);
+			zone->nomte_free_area[order].nr_free = 0;
+		}
 }
 
 /*
@@ -9555,7 +9673,7 @@ static void break_down_buddy_pages(struct zone *zone, struct page *page,
 			continue;
 
 		if (current_buddy != target) {
-			add_to_free_list(current_buddy, zone, high, migratetype);
+			add_to_free_list(current_buddy, zone, high, migratetype, false);
 			set_buddy_order(current_buddy, high);
 			page = next_page;
 		}

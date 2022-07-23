@@ -1076,6 +1076,39 @@ static int migrate_to_node(struct mm_struct *mm, int source, int dest,
 	return err;
 }
 
+int migrate_to_gfp_flags(struct mm_struct *mm, unsigned long start,
+			 unsigned long end, unsigned int gfp_flags)
+{
+	LIST_HEAD(pagelist);
+	int err = 0;
+	struct migration_target_control mtc = {
+		.nid = NUMA_NO_NODE,
+		.gfp_mask = gfp_flags,
+	};
+	nodemask_t nodes;
+
+	nodes_clear(nodes);
+
+	lru_cache_disable();
+
+	queue_pages_range(mm, start, end, &nodes,
+			  MPOL_MF_MOVE_ALL | MPOL_MF_INVERT |
+				  MPOL_MF_DISCONTIG_OK,
+			  &pagelist);
+
+	if (!list_empty(&pagelist)) {
+		err = migrate_pages(&pagelist, alloc_migration_target, NULL,
+				    (unsigned long)&mtc, MIGRATE_SYNC,
+				    MR_SYSCALL, NULL);
+		if (err)
+			putback_movable_pages(&pagelist);
+	}
+
+	lru_cache_enable();
+
+	return err;
+}
+
 /*
  * Move pages between the two nodesets so as to preserve the physical
  * layout as much as possible.

@@ -113,6 +113,13 @@ SYM_FUNC_START(__pi_dcache_clean_inval_poc)
 SYM_FUNC_END(__pi_dcache_clean_inval_poc)
 SYM_FUNC_ALIAS(dcache_clean_inval_poc, __pi_dcache_clean_inval_poc)
 
+SYM_FUNC_START(__pi_dcache_clean_inval_tags_poc)
+	.arch_extension memtag
+	dcache_by_line_op cigvac, sy, x0, x1, x2, x3
+	ret
+SYM_FUNC_END(__pi_dcache_clean_inval_tags_poc)
+SYM_FUNC_ALIAS(dcache_clean_inval_tags_poc, __pi_dcache_clean_inval_tags_poc)
+
 /*
  *	dcache_clean_pou(start, end)
  *

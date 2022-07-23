@@ -928,6 +928,22 @@ struct page *alloc_zeroed_user_highpage_movable(struct vm_area_struct *vma,
 	return alloc_page_vma(flags, vma, vaddr);
 }
 
+void arch_alloc_page(struct page *page, int order)
+{
+	unsigned long vaddr = (unsigned long)page_to_virt(page);
+	unsigned long tag_pfn = pfn_to_tag_pfn(page_to_pfn(page));
+	unsigned long tag_size = PAGE_SIZE << (order > 5 ? order - 5 : 0);
+	unsigned long tag_vaddr;
+
+	if (!tag_pfn)
+		return;
+
+	tag_vaddr = (unsigned long)page_to_virt(pfn_to_page(tag_pfn));
+
+	dcache_clean_inval_tags_poc(vaddr, vaddr + (PAGE_SIZE << order));
+	dcache_clean_inval_poc(tag_vaddr, tag_vaddr + tag_size);
+}
+
 void tag_clear_highpage(struct page *page)
 {
 	mte_zero_clear_page_tags(page_address(page));

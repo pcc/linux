@@ -1042,7 +1042,8 @@ static bool should_skip_region(struct memblock_type *type,
 void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 		      struct memblock_type *type_a,
 		      struct memblock_type *type_b, phys_addr_t *out_start,
-		      phys_addr_t *out_end, int *out_nid)
+		      phys_addr_t *out_end, int *out_nid,
+		      enum memblock_flags *out_flags)
 {
 	int idx_a = *idx & 0xffffffff;
 	int idx_b = *idx >> 32;
@@ -1068,6 +1069,8 @@ void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 				*out_end = m_end;
 			if (out_nid)
 				*out_nid = m_nid;
+			if (out_flags)
+				*out_flags = m->flags;
 			idx_a++;
 			*idx = (u32)idx_a | (u64)idx_b << 32;
 			return;
@@ -1099,6 +1102,8 @@ void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 					*out_end = min(m_end, r_end);
 				if (out_nid)
 					*out_nid = m_nid;
+				if (out_flags)
+					*out_flags = m->flags;
 				/*
 				 * The region which ends first is
 				 * advanced for the next iteration.
@@ -1139,7 +1144,8 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 					  struct memblock_type *type_a,
 					  struct memblock_type *type_b,
 					  phys_addr_t *out_start,
-					  phys_addr_t *out_end, int *out_nid)
+					  phys_addr_t *out_end, int *out_nid,
+					  enum memblock_flags *out_flags)
 {
 	int idx_a = *idx & 0xffffffff;
 	int idx_b = *idx >> 32;
@@ -1172,6 +1178,8 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 				*out_end = m_end;
 			if (out_nid)
 				*out_nid = m_nid;
+			if (out_flags)
+				*out_flags = m->flags;
 			idx_a--;
 			*idx = (u32)idx_a | (u64)idx_b << 32;
 			return;
@@ -1202,6 +1210,8 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 					*out_end = min(m_end, r_end);
 				if (out_nid)
 					*out_nid = m_nid;
+				if (out_flags)
+					*out_flags = m->flags;
 				if (m_start >= r_start)
 					idx_a--;
 				else
